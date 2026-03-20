@@ -11,6 +11,7 @@ const D2L_USERNAME = process.env.D2L_USERNAME;
 const D2L_PASSWORD = process.env.D2L_PASSWORD;
 const REMOTE_DEBUG = process.env.REMOTE_DEBUG === "true";
 const HOME_URL = `https://${D2L_HOST}/d2l/home`;
+const LOGIN_URL = `https://${D2L_HOST}`;
 
 interface TokenCache {
   token: string;
@@ -150,21 +151,38 @@ async function captureToken(
     }
   });
 
-  // Go to home page
+  // Navigate to landing page first (some D2L instances need SSO from root)
   const navigateStartTime = Date.now();
-  console.error(`[AUTH] Navigating to ${HOME_URL}`);
-  await page.goto(HOME_URL, { waitUntil: "networkidle" });
+  console.error(`[AUTH] Navigating to ${LOGIN_URL}`);
+  await page.goto(LOGIN_URL, { waitUntil: "networkidle" });
   const navigateTime = Date.now() - navigateStartTime;
   console.error(`[AUTH] Navigation completed (${navigateTime}ms)`);
 
-  // Check if we're on login page
   let currentUrl = page.url();
-  const isOnLoginPage = isLoginPage(currentUrl);
-  console.error(
-    `[AUTH] Current URL: ${currentUrl}, Is login page: ${isOnLoginPage}`
-  );
+  console.error(`[AUTH] Current URL: ${currentUrl}`);
 
-  if (isOnLoginPage) {
+  // Check for Office 365 / SSO button on the landing page
+  if (!isLoginPage(currentUrl) && !capturedToken) {
+    try {
+      const office365Button = page.locator(
+        'a:has-text("Login with Office 365"), a:has-text("Office 365"), button:has-text("Login with Office 365"), button:has-text("Office 365")'
+      );
+      if (await office365Button.first().isVisible({ timeout: 3000 })) {
+        console.error("[AUTH] Found Office 365 login button, clicking...");
+        await office365Button.first().click();
+        await page.waitForLoadState("networkidle");
+        currentUrl = page.url();
+        console.error(`[AUTH] After SSO click, URL: ${currentUrl}`);
+      }
+    } catch {
+      console.error("[AUTH] No Office 365 button found, continuing...");
+    }
+  }
+
+  const shouldLogin = isLoginPage(currentUrl);
+  console.error(`[AUTH] Is login page: ${shouldLogin}`);
+
+  if (shouldLogin) {
     console.error(`[AUTH] Login required`);
     // If username and password are provided via env vars, use them for login
     if (D2L_USERNAME && D2L_PASSWORD) {
@@ -392,6 +410,13 @@ async function captureToken(
     }
   }
 
+  // Navigate to /d2l/home to trigger authenticated API calls for token capture
+  if (!capturedToken && !isLoginPage(page.url())) {
+    console.error(`[AUTH] Navigating to ${HOME_URL} to trigger API calls`);
+    await page.goto(HOME_URL, { waitUntil: "networkidle" });
+    console.error(`[AUTH] Now at: ${page.url()}`);
+  }
+
   // Wait for token capture
   const maxWait = quickCheck ? 10000 : 120000;
   const waitStartTime = Date.now();
@@ -401,13 +426,11 @@ async function captureToken(
     currentUrl = page.url();
 
     if (!isLoginPage(currentUrl)) {
-      // We're logged in, wait for API calls
       if (!capturedToken) {
         console.error(
           `[AUTH] Token not captured yet, waiting and scrolling...`
         );
         await page.waitForTimeout(2000);
-        // Try scrolling to trigger more API calls
         await page.evaluate(() => window.scrollBy(0, 100));
         await page.waitForTimeout(1000);
       }
