@@ -1,84 +1,84 @@
-# StudyMCP - D2L Brightspace & Piazza MCP Server
+# A2L MCP — Avenue to Learn for AI Assistants
 
-An MCP (Model Context Protocol) server that gives AI assistants access to your university's D2L Brightspace LMS and Piazza discussion forums.
+An MCP (Model Context Protocol) server that gives AI assistants access to McMaster's Avenue to Learn (D2L Brightspace). Ask your AI about assignments, grades, deadlines, course content, and more.
 
-> ⚠️ **Academic Integrity Notice**: This tool is for personal productivity only. Do not use it for any activities that violate your university's Academic Code of Conduct.
+> **Academic Integrity Notice**: This tool is for personal productivity only. Do not use it for any activities that violate McMaster's Academic Integrity Policy.
 
-## Features
+## What You Can Do
 
-### D2L Brightspace Tools
-- **Assignments** - List assignments, view details, check submissions & feedback
-- **Grades** - View all grades with scores and instructor feedback  
-- **Calendar** - Get upcoming due dates and events
-- **Course Content** - Browse syllabus, modules, topics, and lectures
-- **Announcements** - Read instructor announcements
-- **File Downloads** - Download and extract content from course files (docx, pdf, etc.)
+- **Assignments** — List assignments, view details, check submissions & feedback
+- **Grades** — View all grades with scores and instructor feedback
+- **Calendar** — Get upcoming due dates and events
+- **Course Content** — Browse syllabus, modules, topics, and lectures
+- **Announcements** — Read instructor announcements
+- **File Downloads** — Download and extract content from course files (docx, pdf, etc.)
+- **Study Tools** — Task tracking, notes sync, weekly planning
 
-### Piazza Tools
-- **Sync Posts** - Fetch recent posts from your Piazza classes to local database
-- **Semantic Search** - AI-powered search across all your Piazza posts
-- **Get Classes** - List all enrolled Piazza classes
+## Prerequisites
 
-### Study Tools
-- **Task Management** - Track assignments and deadlines across courses
-- **Notes Sync** - Sync and search your course notes
-- **Weekly Planning** - Generate study plans based on upcoming deadlines
+- [Node.js](https://nodejs.org/) v18+
+- A McMaster MacID (`your-macid@mcmaster.ca`)
 
-## Quick Start
+## Setup
 
-### 1. Clone and Install
+### 1. Clone and install
 
 ```bash
-git clone https://github.com/joshuasoup/d2l-mcp.git
-cd d2l-mcp
+git clone https://github.com/alanxue1/a2l-mcp.git
+cd a2l-mcp/a2l-mcp
 npm install
-npm run build
+npx playwright install chromium
 ```
 
-### 2. Configure Environment
+### 2. Configure environment
 
 ```bash
 cp .env.template .env
 ```
 
-Edit `.env` with your credentials:
+Edit `.env` with your McMaster credentials:
 
 ```env
-# Required for D2L
-D2L_HOST=learn.yourschool.edu
-D2L_USERNAME=your-username
+D2L_HOST=avenue.cllmcmaster.ca
+D2L_SSO_LOGIN_URL=https://avenue.mcmaster.ca/login.php
+D2L_USERNAME=your-macid@mcmaster.ca
 D2L_PASSWORD=your-password
-
-# Required for Piazza & Study tools
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-key
-OPENAI_API_KEY=sk-your-key
-
-# Optional: Piazza integration
-PIAZZA_USERNAME=your-email@school.edu
-PIAZZA_PASSWORD=your-piazza-password
 ```
 
-### 3. Set Up Database (for Study Tools)
+The Supabase and OpenAI keys are only needed if you want study tools (task tracking, notes search). The server works without them.
 
-Create a Supabase project and run the schema in `src/study/db/schema.sql`.
-
-### Supabase Setup
-
-1. Create a new Supabase project
-2. Open **SQL Editor**
-3. Run `src/study/db/schema.sql`
-4. Add your Supabase URL + service key to `.env`
-
-### 4. Run the Server
+### 3. Build and authenticate
 
 ```bash
-npm start
+npm run build
+node dist/auth-cli.js
 ```
 
-Server runs on `http://localhost:3000/mcp`
+A browser will open and go through McMaster's Microsoft SSO login. Complete any MFA prompts. The session is saved to `~/.d2l-session/` and lasts ~24 hours.
 
-## Connecting to MCP Clients
+### 4. Start the server
+
+```bash
+MCP_TRANSPORT=http node dist/index.js
+```
+
+Server runs on `http://localhost:3000/mcp`.
+
+## Connecting to Your AI Assistant
+
+### Cursor
+
+Add to your MCP settings (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "a2l": {
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
 
 ### VS Code (Copilot)
 
@@ -88,7 +88,7 @@ Add to your VS Code settings:
 {
   "mcp": {
     "servers": {
-      "studymcp": {
+      "a2l": {
         "url": "http://localhost:3000/mcp"
       }
     }
@@ -103,9 +103,9 @@ Add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "studymcp": {
+    "a2l": {
       "command": "node",
-      "args": ["/path/to/dist/index.js"],
+      "args": ["/path/to/a2l-mcp/a2l-mcp/dist/index.js"],
       "env": {
         "MCP_TRANSPORT": "stdio"
       }
@@ -114,40 +114,23 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-### Poke (MCP Client)
+## Daily Usage
 
-To connect your MCP server to Poke:
-
-1. Start your MCP server locally:
-   ```bash
-   npm start
-   ```
-2. (Optional) Expose your server with ngrok:
-   ```bash
-   ngrok http 3000
-   ```
-3. In Poke, go to **Settings > Connections > Integrations > Add MCP Server**
-4. Enter your MCP server URL:
-   - For local: `http://localhost:3000/mcp`
-   - For remote: use your ngrok URL (e.g., `https://abc123.ngrok.io/mcp`)
-5. Save and test the connection.
-
-You can now use all MCP tools from within Poke.
-
-### Remote Access (ngrok)
-
-To allow external MCP clients to connect to your local server, use ngrok:
+Sessions last ~24 hours. Each day:
 
 ```bash
-npm start
-ngrok http 3000
+cd a2l-mcp
+
+# 1. Start the server
+MCP_TRANSPORT=http node dist/index.js
+
+# 2. If session expired, re-auth in a separate terminal
+node dist/auth-cli.js
 ```
 
-Use the ngrok URL (e.g., `https://abc123.ngrok.io/mcp`) in any MCP client.
+Then just talk to your AI assistant: *"What assignments do I have due this week?"*
 
 ## Available Tools
-
-### D2L Tools
 
 | Tool | Description |
 |------|-------------|
@@ -163,21 +146,9 @@ Use the ngrok URL (e.g., `https://abc123.ngrok.io/mcp`) in any MCP client.
 | `get_announcements` | Get course announcements |
 | `get_my_courses` | List enrolled courses |
 | `download_file` | Download course files |
+| `read_file` | Read downloaded file contents |
 
-### Piazza Tools
-
-| Tool | Description |
-|------|-------------|
-| `piazza_get_classes` | List all enrolled Piazza classes |
-| `piazza_get_posts` | Get posts from a class |
-| `piazza_get_post` | Get a specific post with answers |
-| `piazza_search` | Text search in a class |
-| `piazza_sync` | Sync posts to database |
-| `piazza_embed_missing` | Generate embeddings for search |
-| `piazza_semantic_search` | AI-powered semantic search |
-| `piazza_suggest_for_item` | Find relevant posts for an assignment |
-
-### Study Tools
+### Study Tools (require Supabase + OpenAI)
 
 | Tool | Description |
 |------|-------------|
@@ -188,98 +159,37 @@ Use the ngrok URL (e.g., `https://abc123.ngrok.io/mcp`) in any MCP client.
 | `plan_week` | Generate weekly study plan |
 | `notes_sync` | Sync notes from repository |
 | `notes_search` | Search through notes |
-| `notes_suggest_for_item` | Find relevant notes for assignment |
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `D2L_HOST` | Yes | Your Brightspace hostname (e.g., `learn.uwaterloo.ca`) |
-| `D2L_USERNAME` | No | For automated login |
-| `D2L_PASSWORD` | No | For automated login |
-| `D2L_COURSE_ID` | No | Default course ID |
+| `D2L_HOST` | Yes | `avenue.cllmcmaster.ca` |
+| `D2L_SSO_LOGIN_URL` | Yes | `https://avenue.mcmaster.ca/login.php` |
+| `D2L_USERNAME` | Yes | Your MacID email |
+| `D2L_PASSWORD` | Yes | Your MacID password |
 | `SUPABASE_URL` | For study tools | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | For study tools | Supabase service key |
-| `OPENAI_API_KEY` | For search | OpenAI API key for embeddings |
-| `PIAZZA_USERNAME` | For Piazza | Piazza login email |
-| `PIAZZA_PASSWORD` | For Piazza | Piazza password |
+| `OPENAI_API_KEY` | For study tools | OpenAI API key for embeddings |
 | `MCP_TRANSPORT` | No | `http` (default) or `stdio` |
-| `MCP_PORT` | No | Server port (default: 3000) |
 
-## Important: Private Mapping Files
+## Troubleshooting
 
-You must create and maintain two private mapping files (not tracked in git):
+**"Could not find username field"**
+The SSO login page structure may have changed. Open an issue with the error logs.
 
-- `src/study/db/notes_map.json`: Maps course IDs to the absolute paths of your notes PDFs. Required for notes sync.
-- `src/study/db/piazza_map.json`: Maps course IDs to Piazza class IDs (nids). Required for Piazza tools.
+**Session expires quickly**
+Sessions last ~24 hours. Run `node dist/auth-cli.js` again.
 
-**These files are in .gitignore for your privacy.**
+**MFA / 2FA prompt**
+The browser will open for you to complete MFA. After that, the session is saved automatically.
 
-Example `notes_map.json`:
-```json
-{
-  "MATH119": ["/Users/yourname/Documents/MATH119/Notes.pdf"],
-  "ECE140": ["/Users/yourname/Documents/ECE140/ECE140Notes.pdf"]
-}
-```
+## Credits
 
-Example `piazza_map.json`:
-```json
-{
-  "ECE124": "mj0op591mef2vl",
-  "ECE140": "mjhga7avfwz39z"
-}
-```
+Forked from [mcp-workspace](https://github.com/hamzakammar/mcp-workspace) by [hamzakammar](https://github.com/hamzakammar), who built the original D2L MCP server with Piazza integration, study tools, and the authentication framework that made this possible. This project adapts it for McMaster's split-host SSO setup.
 
-## Session Management
-
-- **D2L tokens** expire after ~1 hour but auto-refresh
-- **Browser sessions** persist in `~/.d2l-session/`
-- **Piazza sessions** persist in `~/.piazza-session/`
-- Run `npm run auth` to manually re-authenticate
-
-## Development
-
-```bash
-# Run tests
-npm test
-
-# Integration tests (requires auth)
-npm run test:integration
-
-# Build
-npm run build
-```
-
-## Project Structure
-
-```
-src/
-├── index.ts          # MCP server entry point
-├── auth.ts           # D2L authentication
-├── client.ts         # D2L API client
-├── tools/            # D2L tool implementations
-│   ├── calendar.ts
-│   ├── content.ts
-│   ├── grades.ts
-│   ├── news.ts
-│   └── piazza.ts
-└── study/            # Study tools (tasks, notes, piazza)
-    ├── piazzaAuth.ts
-    ├── db/
-    │   ├── schema.sql
-    │   └── piazza_map.json
-    └── src/
-        ├── notes.ts
-        ├── piazza.ts
-        ├── planning.ts
-        └── sync.ts
-```
+Originally inspired by [d2l-mcp-server](https://github.com/General-Mudkip/d2l-mcp-server) by General-Mudkip.
 
 ## License
 
 MIT
-
-## Credits
-
-Based on [d2l-mcp-server](https://github.com/General-Mudkip/d2l-mcp-server) by General-Mudkip.

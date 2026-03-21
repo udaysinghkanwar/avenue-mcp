@@ -1,9 +1,9 @@
 {
-    "name": "mcp-workspace",
+    "name": "a2l-mcp",
     "private": true,
     "scripts": {
-      "install:all": "npm --prefix d2l-mcp install",
-      "mcp:launch": "npm --prefix d2l-mcp run mcp:launch",
-      "start": "npm --prefix d2l-mcp start"
+      "install:all": "npm --prefix a2l-mcp install",
+      "build": "npm --prefix a2l-mcp run build",
+      "start": "npm --prefix a2l-mcp start"
     }
 }

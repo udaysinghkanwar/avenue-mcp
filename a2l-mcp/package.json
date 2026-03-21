@@ -1,12 +1,12 @@
 {
-  "name": "d2l-mcp-server",
+  "name": "a2l-mcp-server",
   "version": "1.0.1",
-  "description": "MCP server for D2L Brightspace API with automated authentication",
+  "description": "MCP server for McMaster Avenue to Learn (D2L Brightspace) with Microsoft SSO authentication",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "d2l-mcp": "dist/index.js",
-    "d2l-mcp-auth": "dist/auth-cli.js"
+    "a2l-mcp": "dist/index.js",
+    "a2l-mcp-auth": "dist/auth-cli.js"
   },
   "files": [
     "dist"
@@ -24,7 +24,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/joshuasoup/d2l-mcp"
+    "url": "https://github.com/alanxue1/a2l-mcp"
   },
   "scripts": {
     "mcp:launch": "npm run auth && npm start",

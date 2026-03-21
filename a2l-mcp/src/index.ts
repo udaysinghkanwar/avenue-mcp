@@ -402,6 +402,17 @@ async function main() {
       })
     );
 
+    // Ensure Accept header includes both types required by MCP SDK
+    app.use("/mcp", (req, _res, next) => {
+      const accept = req.headers["accept"] || "";
+      if (!accept.includes("text/event-stream")) {
+        req.headers["accept"] = accept
+          ? `${accept}, text/event-stream`
+          : "application/json, text/event-stream";
+      }
+      next();
+    });
+
     // Map to store transports by session ID
     const transports: Record<string, StreamableHTTPServerTransport> = {};
     

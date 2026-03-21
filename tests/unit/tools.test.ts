@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the client before importing tools
-vi.mock('../d2l-mcp/src/client.js', () => ({
+vi.mock('../a2l-mcp/src/client.js', () => ({
   client: {
     getMyGradeValues: vi.fn(),
     getNews: vi.fn(),
@@ -17,12 +17,12 @@ vi.mock('../d2l-mcp/src/client.js', () => ({
   },
 }));
 
-import { client } from '../d2l-mcp/src/client.js';
-import { gradeTools } from '../d2l-mcp/src/tools/grades.js';
-import { newsTools } from '../d2l-mcp/src/tools/news.js';
-import { calendarTools } from '../d2l-mcp/src/tools/calendar.js';
-import { enrollmentTools } from '../d2l-mcp/src/tools/enrollments.js';
-import { assignmentTools } from '../d2l-mcp/src/tools/dropbox.js';
+import { client } from '../a2l-mcp/src/client.js';
+import { gradeTools } from '../a2l-mcp/src/tools/grades.js';
+import { newsTools } from '../a2l-mcp/src/tools/news.js';
+import { calendarTools } from '../a2l-mcp/src/tools/calendar.js';
+import { enrollmentTools } from '../a2l-mcp/src/tools/enrollments.js';
+import { assignmentTools } from '../a2l-mcp/src/tools/dropbox.js';
 
 import gradesFixture from '../fixtures/grades.json';
 import announcementsFixture from '../fixtures/announcements.json';

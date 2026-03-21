@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { describe, it, expect } from "vitest";
-import { client } from "../d2l-mcp/src/client.js";
+import { client } from "../a2l-mcp/src/client.js";
 
 const SKIP = !process.env.D2L_INTEGRATION_TESTS;
 const COURSE_ID = parseInt(process.env.D2L_COURSE_ID || "68929");

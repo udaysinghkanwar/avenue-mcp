@@ -12,7 +12,7 @@ import {
   marshalAssignments,
   marshalAssignment,
   marshalSubmissions,
-} from '../d2l-mcp/src/utils/marshal.js';
+} from '../a2l-mcp/src/utils/marshal.js';
 
 import gradesFixture from '../fixtures/grades.json';
 import announcementsFixture from '../fixtures/announcements.json';
