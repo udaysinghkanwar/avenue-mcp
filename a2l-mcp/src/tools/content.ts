@@ -1,8 +1,27 @@
 import { z } from 'zod';
+import type { Download, Page } from 'playwright';
 import { client } from '../client.js';
 import { marshalToc, marshalTopic, marshalContentModules, marshalContentModule, RawTocModule, RawTopic, RawContentModule } from '../utils/marshal.js';
 
 const DEFAULT_COURSE_ID = process.env.D2L_COURSE_ID ? parseInt(process.env.D2L_COURSE_ID) : undefined;
+
+/**
+ * D2L "enforced" content URLs often trigger a download on navigation, not an HTML document.
+ * Playwright requires the download listener to be registered in the same turn as navigation
+ * starts, or the event is missed. Use Promise.all([waitForEvent('download'), page.goto(url)]).
+ */
+export async function captureEnforcedContentDownload(
+  page: Page,
+  url: string,
+  options?: { timeout?: number }
+): Promise<Download> {
+  const timeout = options?.timeout ?? 60_000;
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout }),
+    page.goto(url, { waitUntil: 'domcontentloaded', timeout }),
+  ]);
+  return download;
+}
 
 function getOrgUnitId(orgUnitId?: number): number {
   const id = orgUnitId ?? DEFAULT_COURSE_ID;

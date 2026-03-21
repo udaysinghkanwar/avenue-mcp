@@ -5,6 +5,7 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { getAuthenticatedContext } from '../auth.js';
+import { captureEnforcedContentDownload } from './content.js';
 import mammoth from 'mammoth';
 
 const D2L_HOST = process.env.D2L_HOST || 'learn.ul.ie';
@@ -212,21 +213,21 @@ export async function downloadFile(url: string, savePath?: string) {
       };
     };
 
-    // Listen for download event BEFORE navigation so we catch enforced downloads
-    const downloadPromise = page.waitForEvent('download', { timeout: 15000 }).catch(() => null);
+    // Enforced content: download fires during navigation — listener + goto must start together
+    console.error(`[DOWNLOAD] Trying Promise.all(download, goto) for: ${fullUrl}`);
+    try {
+      const download = await captureEnforcedContentDownload(page, fullUrl);
+      console.error(`[DOWNLOAD] Captured enforced-content download`);
+      return await saveDownload(download);
+    } catch (e) {
+      console.error(
+        `[DOWNLOAD] Promise.all(download,goto) failed: ${e instanceof Error ? e.message : e} — falling back`
+      );
+    }
 
-    console.error(`[DOWNLOAD] Navigating to: ${fullUrl}`);
-    const response = await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // Check if navigation itself triggered a download
-    const earlyDownload = await Promise.race([
-      downloadPromise,
-      page.waitForTimeout(3000).then(() => null),
-    ]);
-
-    if (earlyDownload) {
-      console.error(`[DOWNLOAD] Navigation triggered download directly`);
-      return await saveDownload(earlyDownload);
+    // If navigation never ran (rare), load the page for interactive download
+    if (page.url() === 'about:blank') {
+      await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     }
 
     // Strategy 1: Look for download button/link on the page
