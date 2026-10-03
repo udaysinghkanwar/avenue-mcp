@@ -16,6 +16,7 @@ import { gradeTools } from "./tools/grades.js";
 import { calendarTools } from "./tools/calendar.js";
 import { newsTools } from "./tools/news.js";
 import { enrollmentTools } from "./tools/enrollments.js";
+import { courseSiteTools } from "./tools/courseSites.js";
 import { downloadFile, readFile, deleteFile } from "./tools/files.js";
 import { piazzaTools } from "./tools/piazza.js";
 import { PlanningTools } from "./study/src/planning.js";
@@ -197,6 +198,29 @@ function createServer(): McpServer {
     {},
     wrapToolHandler("get_my_courses", async () => {
       return await enrollmentTools.get_my_courses.handler();
+    })
+  );
+
+  // Register external course website tools
+  server.tool(
+    "get_course_site",
+    courseSiteTools.get_course_site.description,
+    courseSiteTools.get_course_site.schema,
+    wrapToolHandler("get_course_site", async (args) => {
+      return await courseSiteTools.get_course_site.handler(
+        args as { course?: string }
+      );
+    })
+  );
+
+  server.tool(
+    "read_course_site_file",
+    courseSiteTools.read_course_site_file.description,
+    courseSiteTools.read_course_site_file.schema,
+    wrapToolHandler("read_course_site_file", async (args) => {
+      return await courseSiteTools.read_course_site_file.handler(
+        args as { course: string; url: string; refresh?: boolean }
+      );
     })
   );
 

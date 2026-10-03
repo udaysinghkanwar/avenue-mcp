@@ -114,6 +114,31 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
+## Course Folders & Websites (optional)
+
+Create `a2l-mcp/courses.json` (gitignored) to file downloads into your own course folders and to add course websites hosted outside Avenue:
+
+```json
+{
+  "rootDir": "/Users/you/Year 3",
+  "courses": {
+    "3O03": { "name": "SFWRENG 3O03: Linear Optimization", "folder": "Linear Optimization" },
+    "3MX3": {
+      "folder": "Signals and Systems",
+      "website": {
+        "pages": ["https://www.cas.mcmaster.ca/~mohrens/3mx3/"],
+        "auth": { "username": "...", "password": "..." }
+      }
+    }
+  }
+}
+```
+
+- Avenue files are saved to `<rootDir>/<folder>/Avenue/<module path>/<topic title>.<ext>`, website files to `<rootDir>/<folder>/Course Website/`. Courses not listed go to `~/Downloads/Avenue/<code>/`.
+- Each file is downloaded once. Repeat requests are served from disk; a cheap conditional request (ETag / Last-Modified) checks for updates at most every 12h, or on `refresh: true`.
+- If you've modified a downloaded file (e.g. annotated a PDF), it's never overwritten — a newer version is saved beside it as `name (updated YYYY-MM-DD).pdf`.
+- The download index and extracted-text cache live in `~/.avenue-mcp/`.
+
 ## Daily Usage
 
 Sessions last ~24 hours. Each day:
