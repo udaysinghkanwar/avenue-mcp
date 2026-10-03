@@ -163,8 +163,20 @@ export class D2LClient {
   }
 
   // Enrollments endpoints (uses LP API v1.43)
+  // Results are paged (100 per page); follow the bookmark to get all of them
   async getMyEnrollments() {
-    return this.get(`/d2l/api/lp/1.43/enrollments/myenrollments/`);
+    const items: unknown[] = [];
+    let bookmark = "";
+    do {
+      const query = bookmark ? `?bookmark=${encodeURIComponent(bookmark)}` : "";
+      const page = await this.get(`/d2l/api/lp/1.43/enrollments/myenrollments/${query}`) as {
+        Items: unknown[];
+        PagingInfo?: { Bookmark: string; HasMoreItems: boolean };
+      };
+      items.push(...page.Items);
+      bookmark = page.PagingInfo?.HasMoreItems ? page.PagingInfo.Bookmark : "";
+    } while (bookmark);
+    return { Items: items };
   }
 }
 
