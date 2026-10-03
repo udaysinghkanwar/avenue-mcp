@@ -201,8 +201,12 @@ async function resolveFile(req: LibraryRequest): Promise<LibraryResult> {
   const res = await req.fetch({});
   const data = Buffer.from(await res.arrayBuffer());
   const meta = validators(res);
-  const savePath = entry ? entry.path : uniquePath(req.targetPath, readManifest(), req.url);
-  const newStat = writeAtomic(savePath, data);
+  // An identical file already at the target (e.g. the manifest was lost) is adopted, not duplicated
+  const adoptable = !entry && fs.existsSync(req.targetPath)
+    && !Object.entries(readManifest()).some(([u, e]) => u !== req.url && e.path === req.targetPath)
+    && fs.readFileSync(req.targetPath).equals(data);
+  const savePath = entry || adoptable ? (entry?.path ?? req.targetPath) : uniquePath(req.targetPath, readManifest(), req.url);
+  const newStat = adoptable ? fs.statSync(savePath) : writeAtomic(savePath, data);
   await updateManifest((m) => {
     m[req.url] = { path: savePath, ...meta, size: newStat.size, mtimeMs: newStat.mtimeMs, downloadedAt: now.toISOString(), checkedAt: now.toISOString() };
   });
