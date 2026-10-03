@@ -109,7 +109,7 @@ export const courseSiteTools = {
       const filename = sanitizeName(decodeURIComponent(new URL(canonical).pathname.split('/').filter(Boolean).pop() || 'index.html'));
       const result = await getFile({
         url: canonical,
-        targetPath: path.join(courseDir(resolved, resolved.code), 'Course Website', filename),
+        targetPath: async () => path.join(courseDir(resolved, resolved.code), 'Course Website', filename),
         fetch: (headers) => siteFetch(resolved.website, canonical, headers),
         canRevalidate: () => true,
         refresh,

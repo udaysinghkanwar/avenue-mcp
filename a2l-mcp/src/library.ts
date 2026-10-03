@@ -19,6 +19,8 @@ const MANIFEST_PATH = path.join(STATE_DIR, 'library.json');
 const TEXT_CACHE_DIR = path.join(STATE_DIR, 'text-cache');
 const REVALIDATE_MS = 12 * 60 * 60 * 1000;
 const REVALIDATE_TIMEOUT_MS = 10_000;
+// Bump when text extraction changes so cached text is regenerated
+const TEXT_CACHE_VERSION = 2;
 
 interface ManifestEntry {
   path: string;
@@ -50,8 +52,8 @@ export interface LibraryResult {
 export interface LibraryRequest {
   /** Canonical source URL (manifest key). */
   url: string;
-  /** Where to save on first download; made unique if taken. */
-  targetPath: string;
+  /** Where to save on first download (made unique if taken). Only called when actually downloading. */
+  targetPath: () => Promise<string>;
   /** Performs the authenticated GET with extra headers. Must throw on auth failure. */
   fetch: (headers: Record<string, string>) => Promise<Response>;
   /** Whether a freshness check may run now (e.g. false if it would need an interactive login). */
@@ -198,14 +200,15 @@ async function resolveFile(req: LibraryRequest): Promise<LibraryResult> {
   }
 
   // Not downloaded yet (or the local file was deleted): download it
+  const targetPath = entry ? entry.path : await req.targetPath();
   const res = await req.fetch({});
   const data = Buffer.from(await res.arrayBuffer());
   const meta = validators(res);
   // An identical file already at the target (e.g. the manifest was lost) is adopted, not duplicated
-  const adoptable = !entry && fs.existsSync(req.targetPath)
-    && !Object.entries(readManifest()).some(([u, e]) => u !== req.url && e.path === req.targetPath)
-    && fs.readFileSync(req.targetPath).equals(data);
-  const savePath = entry || adoptable ? (entry?.path ?? req.targetPath) : uniquePath(req.targetPath, readManifest(), req.url);
+  const adoptable = !entry && fs.existsSync(targetPath)
+    && !Object.entries(readManifest()).some(([u, e]) => u !== req.url && e.path === targetPath)
+    && fs.readFileSync(targetPath).equals(data);
+  const savePath = entry || adoptable ? targetPath : uniquePath(targetPath, readManifest(), req.url);
   const newStat = adoptable ? fs.statSync(savePath) : writeAtomic(savePath, data);
   await updateManifest((m) => {
     m[req.url] = { path: savePath, ...meta, size: newStat.size, mtimeMs: newStat.mtimeMs, downloadedAt: now.toISOString(), checkedAt: now.toISOString() };
@@ -228,7 +231,7 @@ export async function readTextCached(
   extract: (data: Buffer, ext: string) => Promise<string | null>
 ): Promise<string | null> {
   const stat = fs.statSync(filePath);
-  const key = crypto.createHash('sha1').update(`${filePath}|${stat.size}|${stat.mtimeMs}`).digest('hex');
+  const key = crypto.createHash('sha1').update(`v${TEXT_CACHE_VERSION}|${filePath}|${stat.size}|${stat.mtimeMs}`).digest('hex');
   const cachePath = path.join(TEXT_CACHE_DIR, `${key}.txt`);
   if (fs.existsSync(cachePath)) return fs.readFileSync(cachePath, 'utf8');
 

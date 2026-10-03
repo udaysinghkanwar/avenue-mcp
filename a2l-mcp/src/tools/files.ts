@@ -131,7 +131,7 @@ export async function extractContent(data: Buffer, ext: string): Promise<string 
       const parts: string[] = [];
       for (const name of slides) {
         const n = slideNumber(name);
-        let text = xmlText(await zip.file(name)!.async('string'));
+        let text = xmlText(await zip.file(name)!.async('string')).split('\n').filter((l) => !/^\d+$/.test(l)).join('\n');
         const notes = zip.file(`ppt/notesSlides/notesSlide${n}.xml`);
         if (notes) {
           // Notes slides also contain the slide-number placeholder; drop bare numbers
@@ -263,28 +263,31 @@ export async function downloadFile(url: string, savePath?: string, refresh?: boo
   const orgUnitId = enforced ? Number(enforced[1]) : Number(urlPath.match(/\/(\d{5,})(?:\/|$)/)?.[1]) || null;
   const codeHint = enforced?.[2] ?? null;
 
-  let course = codeHint ? findCourse(codeHint) : null;
-  if (!course && orgUnitId) {
-    const name = await courseNameFor(orgUnitId).catch(() => null);
-    if (name) course = findCourse(name);
-  }
+  // Course and module lookups hit the API, so only resolve the folder on a first download
+  const resolveTarget = async (): Promise<string> => {
+    let course = codeHint ? findCourse(codeHint) : null;
+    if (!course && orgUnitId) {
+      const name = await courseNameFor(orgUnitId).catch(() => null);
+      if (name) course = findCourse(name);
+    }
 
-  // Mirror Avenue's module structure and use the topic's title as the filename
-  const location = orgUnitId ? await locateTopic(orgUnitId, fullUrl).catch(() => null) : null;
-  const ext = path.extname(urlFilename);
-  const filename = location && location.title.trim()
-    ? sanitizeName(location.title.toLowerCase().endsWith(ext.toLowerCase()) ? location.title : `${location.title}${ext}`)
-    : sanitizeName(urlFilename);
-  const targetPath = path.join(
-    courseDir(course, codeHint || String(orgUnitId ?? 'Other')),
-    'Avenue',
-    ...(location?.modulePath ?? []).map(sanitizeName),
-    filename
-  );
+    // Mirror Avenue's module structure and use the topic's title as the filename
+    const location = orgUnitId ? await locateTopic(orgUnitId, fullUrl).catch(() => null) : null;
+    const ext = path.extname(urlFilename);
+    const filename = location && location.title.trim()
+      ? sanitizeName(location.title.toLowerCase().endsWith(ext.toLowerCase()) ? location.title : `${location.title}${ext}`)
+      : sanitizeName(urlFilename);
+    return path.join(
+      courseDir(course, codeHint || String(orgUnitId ?? 'Other')),
+      'Avenue',
+      ...(location?.modulePath ?? []).map(sanitizeName),
+      filename
+    );
+  };
 
   const result = await getFile({
     url: fullUrl,
-    targetPath,
+    targetPath: resolveTarget,
     fetch: (headers) => fetchD2L(fullUrl, headers),
     canRevalidate: hasActiveSession,
     refresh,
