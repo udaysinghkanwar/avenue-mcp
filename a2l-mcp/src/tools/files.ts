@@ -9,6 +9,7 @@ import { client } from '../client.js';
 import { findCourse, courseDir, sanitizeName } from '../courses.js';
 import { getFile, readTextCached } from '../library.js';
 import mammoth from 'mammoth';
+import JSZip from 'jszip';
 
 const D2L_HOST = process.env.D2L_HOST || 'learn.ul.ie';
 
@@ -108,6 +109,44 @@ export async function extractContent(data: Buffer, ext: string): Promise<string 
     return null;
   }
   
+  // PowerPoint - slides are XML inside a zip; text lives in <a:t> runs, grouped by <a:p> paragraph
+  if (lowerExt === '.pptx' || lowerExt === '.ppsx') {
+    try {
+      const zip = await JSZip.loadAsync(data);
+      const slideNumber = (name: string) => Number(name.match(/(\d+)\.xml$/)?.[1] ?? 0);
+      const xmlText = (xml: string) =>
+        xml
+          .split(/<\/a:p>/)
+          .map((para) => [...para.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((m) => m[1]).join(''))
+          .map((line) => line
+            .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'").replace(/&amp;/g, '&').trim())
+          .filter(Boolean)
+          .join('\n');
+
+      const slides = Object.keys(zip.files)
+        .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+        .sort((a, b) => slideNumber(a) - slideNumber(b));
+
+      const parts: string[] = [];
+      for (const name of slides) {
+        const n = slideNumber(name);
+        let text = xmlText(await zip.file(name)!.async('string'));
+        const notes = zip.file(`ppt/notesSlides/notesSlide${n}.xml`);
+        if (notes) {
+          // Notes slides also contain the slide-number placeholder; drop bare numbers
+          const notesText = xmlText(await notes.async('string')).split('\n').filter((l) => !/^\d+$/.test(l)).join('\n');
+          if (notesText) text += `\n[Notes] ${notesText}`;
+        }
+        parts.push(`--- Slide ${n} ---\n${text || '(no text — likely a diagram or image)'}`);
+      }
+      return parts.length ? parts.join('\n\n') : null;
+    } catch (error: any) {
+      console.error(`[PPTX] Error extracting text: ${error?.message || error}`);
+      return null;
+    }
+  }
+
   // PDF files - extract text with pdf-parse
   if (lowerExt === '.pdf') {
     try {
