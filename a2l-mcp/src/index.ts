@@ -203,24 +203,31 @@ function createServer(): McpServer {
   // Register file tools
   server.tool(
     "download_file",
-    "Download a file from D2L Brightspace. Provide a D2L content URL (e.g., https://learn.ul.ie/content/enforced/68929-CS4444.../file.docx or /content/enforced/...). The file will be saved to your Downloads folder by default, or to a custom path if specified. Returns the local file path, filename, size, and content type. Use this to download lecture slides, assignment files, course materials, or any file linked in course content.",
+    "Get a file from Avenue (D2L Brightspace) and return its text. Provide the file's URL from get_course_content / get_course_topic (e.g. /content/enforced/781481-SFWRENG_3O03_.../hw1.pdf). Files are saved once into the user's course folder, organized by Avenue module (e.g. 'Year 3/Linear Optimization/Avenue/Lecture slides/2_modeling.pdf'), and served from disk afterwards, so calling this again for the same file is instant and doesn't re-download. Returns the local path, status (downloaded / cached / updated), and the extracted text. Set refresh=true only if the user says the file was updated.",
     {
       url: z
         .string()
         .describe(
-          "The D2L URL or path to the file to download (e.g., https://learn.ul.ie/content/enforced/68929-CS4444_SEM1_2025_6/file.docx)"
+          "The Avenue URL or path of the file (e.g. /content/enforced/781481-SFWRENG_3O03_deza_1_2269/hw1_3-4O03_26.pdf)"
         ),
+      refresh: z
+        .boolean()
+        .optional()
+        .describe("Force a check for a newer version on Avenue"),
       savePath: z
         .string()
         .optional()
         .describe(
-          "Optional: Custom path to save the file (directory or full file path). Defaults to ~/Downloads"
+          "Optional: also copy the file to this directory or path. Only use if the user asks for a specific location."
         ),
     },
     wrapToolHandler("download_file", async (args) => {
-      const result = await downloadFile(args.url, args.savePath);
+      const result = await downloadFile(args.url, args.savePath, args.refresh);
       const sizeKB = (result.size / 1024).toFixed(1);
-      let text = `Downloaded: ${result.filename}\nPath: ${result.path}\nSize: ${sizeKB} KB\nType: ${result.contentType}`;
+      let text = `File: ${result.filename}\nPath: ${result.path}\nStatus: ${result.status}\nSize: ${sizeKB} KB\nType: ${result.contentType}`;
+      if (result.note) {
+        text += `\nNote: ${result.note}`;
+      }
 
       if (result.content) {
         text += `\n\n--- File Content ---\n${result.content}`;

@@ -4,14 +4,16 @@ import * as os from 'os';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
-import { getAuthenticatedContext } from '../auth.js';
-import { captureEnforcedContentDownload } from './content.js';
+import { getD2LCookies, hasActiveSession, clearTokenCache } from '../auth.js';
+import { client } from '../client.js';
+import { findCourse, courseDir, sanitizeName } from '../courses.js';
+import { getFile, readTextCached } from '../library.js';
 import mammoth from 'mammoth';
 
 const D2L_HOST = process.env.D2L_HOST || 'learn.ul.ie';
 
 // Extract text content from various file types
-async function extractContent(data: Buffer, ext: string): Promise<string | null> {
+export async function extractContent(data: Buffer, ext: string): Promise<string | null> {
   const lowerExt = ext.toLowerCase();
   
   // Text-based files - return as string
@@ -146,177 +148,128 @@ async function extractContent(data: Buffer, ext: string): Promise<string | null>
   return null;
 }
 
-export async function downloadFile(url: string, savePath?: string) {
-  // Ensure full URL
-  const fullUrl = url.startsWith('http') ? url : `https://${D2L_HOST}${url}`;
-  
-  // Extract filename from URL
-  const urlPath = new URL(fullUrl).pathname;
-  const pathParts = urlPath.split('/');
-  const urlFilename = decodeURIComponent(pathParts[pathParts.length - 1] || 'download');
+// ---- Avenue file downloads (organized into the course library) ----
 
-  // Get authenticated browser context (handles SSO login if needed)
-  const browser = await getAuthenticatedContext();
+interface TocNode {
+  Title: string;
+  Topics?: { Title: string; Url?: string }[];
+  Modules?: TocNode[];
+}
 
-  try {
-    const page = await browser.newPage();
+const TOC_TTL_MS = 10 * 60 * 1000;
+const tocCache = new Map<number, { at: number; modules: TocNode[] }>();
+let enrollmentNames: Map<number, string> | null = null;
 
-    const downloadsDir = savePath && fs.existsSync(savePath) && fs.statSync(savePath).isDirectory()
-      ? savePath
-      : path.join(os.homedir(), 'Downloads');
-
-    const extToMime: Record<string, string> = {
-      '.pdf': 'application/pdf',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.doc': 'application/msword',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.xls': 'application/vnd.ms-excel',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      '.ppt': 'application/vnd.ms-powerpoint',
-      '.zip': 'application/zip',
-      '.txt': 'text/plain',
-      '.html': 'text/html',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-    };
-
-    const saveDownload = async (download: any) => {
-      const suggestedFilename = download.suggestedFilename() || urlFilename;
-      let finalPath = savePath && fs.existsSync(savePath) && !fs.statSync(savePath).isDirectory()
-        ? savePath
-        : path.join(downloadsDir, suggestedFilename);
-
-      let counter = 1;
-      const ext = path.extname(finalPath);
-      const base = path.basename(finalPath, ext);
-      const dirPath = path.dirname(finalPath);
-      while (fs.existsSync(finalPath)) {
-        finalPath = path.join(dirPath, `${base} (${counter})${ext}`);
-        counter++;
-      }
-
-      await download.saveAs(finalPath);
-      console.error(`[DOWNLOAD] File saved: ${finalPath}`);
-
-      const data = fs.readFileSync(finalPath);
-      const contentType = extToMime[ext.toLowerCase()] || 'application/octet-stream';
-      const textContent = await extractContent(data, ext);
-
-      return {
-        path: finalPath,
-        filename: path.basename(finalPath),
-        size: data.length,
-        contentType,
-        content: textContent,
-      };
-    };
-
-    // Enforced content: download fires during navigation — listener + goto must start together
-    console.error(`[DOWNLOAD] Trying Promise.all(download, goto) for: ${fullUrl}`);
-    try {
-      const download = await captureEnforcedContentDownload(page, fullUrl);
-      console.error(`[DOWNLOAD] Captured enforced-content download`);
-      return await saveDownload(download);
-    } catch (e) {
-      console.error(
-        `[DOWNLOAD] Promise.all(download,goto) failed: ${e instanceof Error ? e.message : e} — falling back`
-      );
-    }
-
-    // If navigation never ran (rare), load the page for interactive download
-    if (page.url() === 'about:blank') {
-      await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    }
-
-    // Strategy 1: Look for download button/link on the page
-    const downloadSelectors = [
-      'a[download]',
-      'a:has-text("Download")',
-      'button:has-text("Download")',
-      'a[href*="download"]',
-      'a[href*="ViewFile"]',
-      'a[href*="FileDownload"]',
-      '[data-download]',
-    ];
-
-    const clickDownloadPromise = page.waitForEvent('download', { timeout: 10000 }).catch(() => null);
-
-    let clicked = false;
-    for (const selector of downloadSelectors) {
-      try {
-        const element = await page.locator(selector).first();
-        if (await element.isVisible({ timeout: 2000 })) {
-          console.error(`[DOWNLOAD] Found download element: ${selector}`);
-          await element.click();
-          clicked = true;
-          break;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    if (clicked) {
-      const download = await clickDownloadPromise;
-      if (download) {
-        return await saveDownload(download);
-      }
-    }
-
-    // Strategy 2: Direct HTTP fetch (for non-HTML file responses)
-    console.error(`[DOWNLOAD] Trying direct HTTP fetch...`);
-    const directResponse = await page.request.get(fullUrl);
-    const responseContentType = directResponse.headers()['content-type'] || '';
-
-    if (!responseContentType.includes('text/html') && directResponse.ok()) {
-      console.error(`[DOWNLOAD] Direct file download (${responseContentType})`);
-      const data = await directResponse.body();
-
-      const contentDisposition = directResponse.headers()['content-disposition'] || '';
-      let filename = urlFilename;
-      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-      if (filenameMatch) {
-        filename = filenameMatch[1].replace(/['"]/g, '');
-      }
-
-      let finalPath = savePath && fs.existsSync(savePath) && !fs.statSync(savePath).isDirectory()
-        ? savePath
-        : path.join(downloadsDir, filename);
-
-      let counter = 1;
-      const ext = path.extname(finalPath);
-      const base = path.basename(finalPath, ext);
-      const dirPath = path.dirname(finalPath);
-      while (fs.existsSync(finalPath)) {
-        finalPath = path.join(dirPath, `${base} (${counter})${ext}`);
-        counter++;
-      }
-
-      fs.writeFileSync(finalPath, data);
-      console.error(`[DOWNLOAD] File saved: ${finalPath} (${(data.length / 1024).toFixed(1)} KB)`);
-
-      const finalContentType = responseContentType.includes('octet-stream')
-        ? (extToMime[ext.toLowerCase()] || responseContentType)
-        : responseContentType;
-
-      const textContent = await extractContent(data, ext);
-
-      return {
-        path: finalPath,
-        filename: path.basename(finalPath),
-        size: data.length,
-        contentType: finalContentType,
-        content: textContent,
-      };
-    }
-
-    throw new Error('Could not trigger file download. The page may use enforced content that requires manual download.');
-
-  } finally {
-    await browser.close();
+/** Course name/code for an org unit id, from enrollments (fetched once per process). */
+async function courseNameFor(orgUnitId: number): Promise<string | null> {
+  if (!enrollmentNames) {
+    const { Items } = await client.getMyEnrollments() as { Items: { OrgUnit: { Id: number; Name: string; Code?: string } }[] };
+    enrollmentNames = new Map(Items.map((i) => [i.OrgUnit.Id, `${i.OrgUnit.Code ?? ''} ${i.OrgUnit.Name}`]));
   }
+  return enrollmentNames.get(orgUnitId) ?? null;
+}
+
+/** Find which module (folder path) and topic title a file URL belongs to in the course's content. */
+async function locateTopic(orgUnitId: number, fileUrl: string): Promise<{ modulePath: string[]; title: string } | null> {
+  let cached = tocCache.get(orgUnitId);
+  if (!cached || Date.now() - cached.at > TOC_TTL_MS) {
+    const toc = await client.getContentToc(orgUnitId) as { Modules: TocNode[] };
+    cached = { at: Date.now(), modules: toc.Modules || [] };
+    tocCache.set(orgUnitId, cached);
+  }
+  const target = decodeURIComponent(new URL(fileUrl).pathname);
+  const search = (modules: TocNode[], trail: string[]): { modulePath: string[]; title: string } | null => {
+    for (const mod of modules) {
+      const here = [...trail, mod.Title];
+      for (const topic of mod.Topics || []) {
+        if (topic.Url && decodeURIComponent(topic.Url.split('?')[0]) === target) return { modulePath: here, title: topic.Title };
+      }
+      const found = search(mod.Modules || [], here);
+      if (found) return found;
+    }
+    return null;
+  };
+  return search(cached.modules, []);
+}
+
+/** GET a D2L file with the session cookies; retries once with a fresh login if the session expired. */
+async function fetchD2L(url: string, headers: Record<string, string>): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let target = url;
+    let res: Response | null = null;
+    for (let hop = 0; hop < 5; hop++) {
+      res = await fetch(target, { headers: { ...headers, Cookie: await getD2LCookies() }, redirect: 'manual' });
+      const location = res.headers.get('location');
+      if (res.status < 300 || res.status >= 400 || res.status === 304 || !location) break;
+      target = new URL(location, target).toString();
+    }
+    if (res && new URL(target).pathname.startsWith('/d2l/login')) {
+      console.error('[DOWNLOAD] D2L session expired, logging in again');
+      clearTokenCache();
+      continue;
+    }
+    if (res && (res.ok || res.status === 304)) return res;
+    throw new Error(`Avenue returned ${res?.status} for ${url}`);
+  }
+  throw new Error('Avenue session expired and re-login failed');
+}
+
+export async function downloadFile(url: string, savePath?: string, refresh?: boolean) {
+  const fullUrl = new URL(url.startsWith('http') ? url : `https://${D2L_HOST}${url}`).toString();
+  const urlPath = decodeURIComponent(new URL(fullUrl).pathname);
+  const urlFilename = urlPath.split('/').filter(Boolean).pop() || 'download';
+
+  // /content/enforced/781481-SFWRENG_3O03_deza_1_2269/file.pdf, or an org unit id elsewhere in the path
+  const enforced = urlPath.match(/\/content\/enforced\/(\d+)-([^/]+)\//);
+  const orgUnitId = enforced ? Number(enforced[1]) : Number(urlPath.match(/\/(\d{5,})(?:\/|$)/)?.[1]) || null;
+  const codeHint = enforced?.[2] ?? null;
+
+  let course = codeHint ? findCourse(codeHint) : null;
+  if (!course && orgUnitId) {
+    const name = await courseNameFor(orgUnitId).catch(() => null);
+    if (name) course = findCourse(name);
+  }
+
+  // Mirror Avenue's module structure and use the topic's title as the filename
+  const location = orgUnitId ? await locateTopic(orgUnitId, fullUrl).catch(() => null) : null;
+  const ext = path.extname(urlFilename);
+  const filename = location && location.title.trim()
+    ? sanitizeName(location.title.toLowerCase().endsWith(ext.toLowerCase()) ? location.title : `${location.title}${ext}`)
+    : sanitizeName(urlFilename);
+  const targetPath = path.join(
+    courseDir(course, codeHint || String(orgUnitId ?? 'Other')),
+    'Avenue',
+    ...(location?.modulePath ?? []).map(sanitizeName),
+    filename
+  );
+
+  const result = await getFile({
+    url: fullUrl,
+    targetPath,
+    fetch: (headers) => fetchD2L(fullUrl, headers),
+    canRevalidate: hasActiveSession,
+    refresh,
+  });
+
+  // Optional extra copy somewhere specific; the library copy stays the source of truth
+  let finalPath = result.path;
+  if (savePath) {
+    finalPath = fs.existsSync(savePath) && fs.statSync(savePath).isDirectory()
+      ? path.join(savePath, path.basename(result.path))
+      : savePath;
+    fs.mkdirSync(path.dirname(finalPath), { recursive: true });
+    fs.copyFileSync(result.path, finalPath);
+  }
+
+  return {
+    path: finalPath,
+    filename: path.basename(finalPath),
+    size: result.size,
+    contentType: result.contentType || 'application/octet-stream',
+    status: result.status,
+    note: result.note,
+    content: await readTextCached(result.path, extractContent),
+  };
 }
 
 /**

@@ -17,9 +17,16 @@ const LOGIN_URL = `https://${D2L_HOST}`;
 interface TokenCache {
   token: string;
   expiresAt: number;
+  // D2L session cookies from the same login; /content/enforced/ files need these, not the Bearer token
+  cookies: string;
 }
 
-let tokenCache: TokenCache = { token: "", expiresAt: 0 };
+let tokenCache: TokenCache = { token: "", expiresAt: 0, cookies: "" };
+
+async function d2lCookieHeader(context: BrowserContext): Promise<string> {
+  const cookies = await context.cookies(LOGIN_URL);
+  return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+}
 
 function isLoginPage(url: string): boolean {
   return (
@@ -107,6 +114,7 @@ export async function getToken(): Promise<string> {
       tokenCache = {
         token: retryResult.token,
         expiresAt: Date.now() + 82800000, // 23 hours
+        cookies: await d2lCookieHeader(context),
       };
       const totalTime = Date.now() - authStartTime;
       console.error(`[AUTH] Token refresh completed (${totalTime}ms)`);
@@ -116,6 +124,7 @@ export async function getToken(): Promise<string> {
     tokenCache = {
       token: result.token,
       expiresAt: Date.now() + 82800000, // 23 hours
+      cookies: await d2lCookieHeader(context),
     };
     const totalTime = Date.now() - authStartTime;
     console.error(`[AUTH] Token refresh completed (${totalTime}ms)`);
@@ -497,7 +506,18 @@ export async function refreshTokenIfNeeded(): Promise<string> {
 }
 
 export function clearTokenCache(): void {
-  tokenCache = { token: "", expiresAt: 0 };
+  tokenCache = { token: "", expiresAt: 0, cookies: "" };
+}
+
+/** Cookie header for fetching D2L files directly (logs in if needed). */
+export async function getD2LCookies(): Promise<string> {
+  await getToken();
+  return tokenCache.cookies;
+}
+
+/** True if a login is already cached, i.e. D2L requests won't open a browser. */
+export function hasActiveSession(): boolean {
+  return !!tokenCache.token && Date.now() < tokenCache.expiresAt - 3600000;
 }
 
 export function getTokenExpiry(): number {
