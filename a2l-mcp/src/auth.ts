@@ -388,6 +388,22 @@ async function captureToken(
           return { token: "", needsLogin: true };
         }
       }
+    } else if (D2L_SSO_LOGIN_URL) {
+      // No credentials: go through the SSO entry point so a saved Microsoft
+      // session (persistent profile cookies) can log in without user input.
+      console.error(`[AUTH] Navigating to SSO login: ${D2L_SSO_LOGIN_URL}`);
+      try {
+        await page.goto(D2L_SSO_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.waitForURL((url) => url.toString().includes(D2L_HOST) && !isLoginPage(url.toString()), {
+          timeout: quickCheck ? 15000 : 120000,
+        });
+        console.error(`[AUTH] SSO login completed, now at ${page.url()}`);
+      } catch {
+        if (quickCheck && !capturedToken) {
+          await page.close();
+          return { token: "", needsLogin: true };
+        }
+      }
     } else {
       // No credentials provided, try SSO button
       try {
@@ -415,7 +431,8 @@ async function captureToken(
   // Navigate to /d2l/home to trigger authenticated API calls for token capture
   if (!capturedToken && !isLoginPage(page.url())) {
     console.error(`[AUTH] Navigating to ${HOME_URL} to trigger API calls`);
-    await page.goto(HOME_URL, { waitUntil: "networkidle" });
+    // D2L home keeps polling, so "networkidle" can time out; the loop below waits for the token
+    await page.goto(HOME_URL, { waitUntil: "domcontentloaded" });
     console.error(`[AUTH] Now at: ${page.url()}`);
   }
 
@@ -433,7 +450,8 @@ async function captureToken(
           `[AUTH] Token not captured yet, waiting and scrolling...`
         );
         await page.waitForTimeout(2000);
-        await page.evaluate(() => window.scrollBy(0, 100));
+        // May throw if the page navigates mid-call (e.g. SSO redirects)
+        await page.evaluate(() => window.scrollBy(0, 100)).catch(() => {});
         await page.waitForTimeout(1000);
       }
 
