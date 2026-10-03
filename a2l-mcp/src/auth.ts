@@ -52,6 +52,36 @@ export async function getToken(): Promise<string> {
     return tokenCache.token;
   }
 
+  // Concurrent callers share one refresh: each refresh launches a browser on the
+  // same persistent profile, and Chromium allows only one process per profile.
+  if (!refreshInFlight) {
+    refreshInFlight = refreshToken().finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+let refreshInFlight: Promise<string> | null = null;
+
+/**
+ * Launch the persistent browser profile, waiting if another process (e.g. a second
+ * MCP server instance) currently holds it.
+ */
+async function launchProfile(options: Parameters<typeof chromium.launchPersistentContext>[1]): Promise<BrowserContext> {
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    try {
+      return await chromium.launchPersistentContext(SESSION_PATH, options);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("ProcessSingleton") || Date.now() > deadline) throw error;
+      console.error("[AUTH] Browser profile in use by another process, retrying...");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+}
+
+async function refreshToken(): Promise<string> {
+  const authStartTime = Date.now();
   console.error(`[AUTH] Token cache miss - refreshing token`);
   const hasExistingSession = existsSync(SESSION_PATH);
   console.error(
@@ -75,7 +105,7 @@ export async function getToken(): Promise<string> {
   const isMac = process.platform === "darwin";
   const isProduction = process.env.NODE_ENV === "production" || (!isMac && !process.env.DISPLAY);
   const headless = isProduction || (hasExistingSession && !REMOTE_DEBUG);
-  let context = await chromium.launchPersistentContext(SESSION_PATH, {
+  let context = await launchProfile({
     headless,
     viewport: { width: 1280, height: 720 },
     args: browserArgs.length > 0 ? browserArgs : undefined,
@@ -96,7 +126,7 @@ export async function getToken(): Promise<string> {
       await context.close();
       console.error("[AUTH] Session expired, opening browser for login...");
       const retryBrowserStartTime = Date.now();
-      context = await chromium.launchPersistentContext(SESSION_PATH, {
+      context = await launchProfile({
         headless: false,
         viewport: { width: 1280, height: 720 },
         args: browserArgs.length > 0 ? browserArgs : undefined,
