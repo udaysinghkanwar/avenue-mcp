@@ -1,4 +1,4 @@
-import { getToken } from "./auth.js";
+import { getToken, clearTokenCache } from "./auth.js";
 
 const D2L_HOST = process.env.D2L_HOST || "learn.ul.ie";
 const BASE_URL = `https://${D2L_HOST}`;
@@ -20,32 +20,41 @@ export class D2LClient {
 
     console.error(`[API] Starting ${method} request to: ${path}`);
 
-    const tokenStartTime = Date.now();
-    const token = await getToken();
-    const tokenTime = Date.now() - tokenStartTime;
-    console.error(`[API] Token obtained (${tokenTime}ms)`);
+    let response!: Response;
+    // A 401 means the token was rejected (e.g. expired or revoked early):
+    // drop it, log in again, and retry once
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const tokenStartTime = Date.now();
+      const token = await getToken();
+      const tokenTime = Date.now() - tokenStartTime;
+      console.error(`[API] Token obtained (${tokenTime}ms)`);
 
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
 
-    const options: RequestInit = {
-      method,
-      headers,
-    };
+      const options: RequestInit = {
+        method,
+        headers,
+      };
 
-    if (body) {
-      options.body = JSON.stringify(body);
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      const fetchStartTime = Date.now();
+      response = await fetch(url, options);
+      const fetchTime = Date.now() - fetchStartTime;
+
+      console.error(
+        `[API] ${method} ${path} - Status: ${response.status} (${fetchTime}ms)`
+      );
+
+      if (response.status !== 401 || attempt === 2) break;
+      console.error(`[API] Token rejected, refreshing and retrying`);
+      clearTokenCache();
     }
-
-    const fetchStartTime = Date.now();
-    const response = await fetch(url, options);
-    const fetchTime = Date.now() - fetchStartTime;
-
-    console.error(
-      `[API] ${method} ${path} - Status: ${response.status} (${fetchTime}ms)`
-    );
 
     if (!response.ok) {
       const errorText = await response.text();

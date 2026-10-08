@@ -23,6 +23,27 @@ interface TokenCache {
 
 let tokenCache: TokenCache = { token: "", expiresAt: 0, cookies: "" };
 
+// Refresh this long before the token actually expires
+const EXPIRY_MARGIN_MS = 3 * 60 * 1000;
+
+/**
+ * Expiry time of a D2L access token. They're JWTs that live about an hour,
+ * so read the real `exp` claim rather than assuming a lifetime.
+ */
+function tokenExpiry(token: string): number {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+    if (typeof payload.exp === "number") return payload.exp * 1000;
+  } catch {
+    // Not a JWT; fall through to a conservative default
+  }
+  return Date.now() + 50 * 60 * 1000;
+}
+
+function tokenIsFresh(): boolean {
+  return !!tokenCache.token && Date.now() < tokenCache.expiresAt - EXPIRY_MARGIN_MS;
+}
+
 async function d2lCookieHeader(context: BrowserContext): Promise<string> {
   const cookies = await context.cookies(LOGIN_URL);
   return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
@@ -41,7 +62,7 @@ export async function getToken(): Promise<string> {
   const authStartTime = Date.now();
 
   // Return cached token if still valid (with 1 hour buffer for safety)
-  if (tokenCache.token && Date.now() < tokenCache.expiresAt - 3600000) {
+  if (tokenIsFresh()) {
     const cacheTime = Date.now() - authStartTime;
     const timeUntilExpiry = tokenCache.expiresAt - Date.now();
     console.error(
@@ -143,7 +164,7 @@ async function refreshToken(): Promise<string> {
 
       tokenCache = {
         token: retryResult.token,
-        expiresAt: Date.now() + 82800000, // 23 hours
+        expiresAt: tokenExpiry(retryResult.token),
         cookies: await d2lCookieHeader(context),
       };
       const totalTime = Date.now() - authStartTime;
@@ -153,7 +174,7 @@ async function refreshToken(): Promise<string> {
 
     tokenCache = {
       token: result.token,
-      expiresAt: Date.now() + 82800000, // 23 hours
+      expiresAt: tokenExpiry(result.token),
       cookies: await d2lCookieHeader(context),
     };
     const totalTime = Date.now() - authStartTime;
@@ -547,7 +568,7 @@ export async function getD2LCookies(): Promise<string> {
 
 /** True if a login is already cached, i.e. D2L requests won't open a browser. */
 export function hasActiveSession(): boolean {
-  return !!tokenCache.token && Date.now() < tokenCache.expiresAt - 3600000;
+  return tokenIsFresh();
 }
 
 export function getTokenExpiry(): number {
