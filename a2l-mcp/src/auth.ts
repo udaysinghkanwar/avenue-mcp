@@ -58,7 +58,16 @@ function isLoginPage(url: string): boolean {
   );
 }
 
-export async function getToken(): Promise<string> {
+const LOGIN_REQUIRED_MESSAGE =
+  "Avenue login has expired. Run `npm run auth` in the a2l-mcp folder to log in again, then retry.";
+
+/**
+ * Get a D2L access token. By default this never waits for a person: if the saved
+ * session can't log in silently it throws LOGIN_REQUIRED_MESSAGE, because an MCP
+ * tool call times out long before anyone could finish SSO/MFA in a browser window.
+ * Pass `interactive: true` (auth-cli) to open a browser and wait for the login.
+ */
+export async function getToken({ interactive = false }: { interactive?: boolean } = {}): Promise<string> {
   const authStartTime = Date.now();
 
   // Return cached token if still valid (with 1 hour buffer for safety)
@@ -76,7 +85,7 @@ export async function getToken(): Promise<string> {
   // Concurrent callers share one refresh: each refresh launches a browser on the
   // same persistent profile, and Chromium allows only one process per profile.
   if (!refreshInFlight) {
-    refreshInFlight = refreshToken().finally(() => { refreshInFlight = null; });
+    refreshInFlight = refreshToken(interactive).finally(() => { refreshInFlight = null; });
   }
   return refreshInFlight;
 }
@@ -101,7 +110,7 @@ async function launchProfile(options: Parameters<typeof chromium.launchPersisten
   }
 }
 
-async function refreshToken(): Promise<string> {
+async function refreshToken(interactive: boolean): Promise<string> {
   const authStartTime = Date.now();
   console.error(`[AUTH] Token cache miss - refreshing token`);
   const hasExistingSession = existsSync(SESSION_PATH);
@@ -125,7 +134,9 @@ async function refreshToken(): Promise<string> {
   const browserStartTime = Date.now();
   const isMac = process.platform === "darwin";
   const isProduction = process.env.NODE_ENV === "production" || (!isMac && !process.env.DISPLAY);
-  const headless = isProduction || (hasExistingSession && !REMOTE_DEBUG);
+  // Without a person to log in, only a silent (headless, quick) attempt makes sense
+  const quickCheck = hasExistingSession || !interactive;
+  const headless = isProduction || (quickCheck && !REMOTE_DEBUG);
   let context = await launchProfile({
     headless,
     viewport: { width: 1280, height: 720 },
@@ -138,12 +149,17 @@ async function refreshToken(): Promise<string> {
 
   try {
     const captureStartTime = Date.now();
-    const result = await captureToken(context, hasExistingSession);
+    const result = await captureToken(context, quickCheck);
     const captureTime = Date.now() - captureStartTime;
     console.error(`[AUTH] Token captured (${captureTime}ms)`);
 
+    if (result.needsLogin && !interactive) {
+      console.error("[AUTH] Session expired and no one to log in; failing fast");
+      throw new Error(LOGIN_REQUIRED_MESSAGE);
+    }
+
     // If we need to login and were running headless, restart with headed browser
-    if (result.needsLogin && hasExistingSession) {
+    if (result.needsLogin) {
       await context.close();
       console.error("[AUTH] Session expired, opening browser for login...");
       const retryBrowserStartTime = Date.now();

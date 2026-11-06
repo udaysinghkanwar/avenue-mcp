@@ -28,7 +28,7 @@ async function main() {
   console.log("");
 
   try {
-    const token = await getToken();
+    const token = await getToken({ interactive: true });
     const expiry = new Date(getTokenExpiry());
 
     console.log("");
